@@ -11,22 +11,13 @@ import {
 import ModalForm from '../../components/ModalForm';
 import ConfirmDialog from '../../components/ConfirmDialog';
 
-// Dummy data sesuai permintaan awal
-const initialData = [
-  { id_karyawan: 'K001', nik: '1001', nama_lengkap: 'Budi Santoso', jabatan: 'Staff Operasional', departemen: 'Operasional', status_karyawan: 'Tetap', tempat_lahir: 'Jakarta', tanggal_lahir: '1990-01-01', jenis_kelamin: 'Laki-laki', alamat: 'Jl. Merdeka No. 1', no_hp: '081234567890', email: 'budi@example.com', pendidikan_terakhir: 'S1', jurusan: 'Teknik Industri', tanggal_masuk: '2015-05-10', masa_kerja: 9 },
-  { id_karyawan: 'K002', nik: '1002', nama_lengkap: 'Siti Aminah', jabatan: 'Staff Keuangan', departemen: 'Keuangan', status_karyawan: 'Tetap', tempat_lahir: 'Bandung', tanggal_lahir: '1992-02-15', jenis_kelamin: 'Perempuan', alamat: 'Jl. Asia Afrika', no_hp: '081234567891', email: 'siti@example.com', pendidikan_terakhir: 'S1', jurusan: 'Akuntansi', tanggal_masuk: '2016-08-20', masa_kerja: 8 },
-  { id_karyawan: 'K003', nik: '1003', nama_lengkap: 'Ahmad Faisal', jabatan: 'Supervisor Lapangan', departemen: 'Operasional', status_karyawan: 'Tetap', tempat_lahir: 'Surabaya', tanggal_lahir: '1988-11-20', jenis_kelamin: 'Laki-laki', alamat: 'Jl. Pahlawan', no_hp: '081234567892', email: 'ahmad@example.com', pendidikan_terakhir: 'S1', jurusan: 'Manajemen', tanggal_masuk: '2014-03-01', masa_kerja: 10 },
-  { id_karyawan: 'K004', nik: '1004', nama_lengkap: 'Rina Wijaya', jabatan: 'Staff HRD', departemen: 'HRD', status_karyawan: 'Kontrak', tempat_lahir: 'Yogyakarta', tanggal_lahir: '1995-07-05', jenis_kelamin: 'Perempuan', alamat: 'Jl. Malioboro', no_hp: '081234567893', email: 'rina@example.com', pendidikan_terakhir: 'S1', jurusan: 'Psikologi', tanggal_masuk: '2021-01-15', masa_kerja: 3 },
-  { id_karyawan: 'K005', nik: '1005', nama_lengkap: 'Doni Pratama', jabatan: 'Teknisi', departemen: 'Teknik', status_karyawan: 'Kontrak', tempat_lahir: 'Semarang', tanggal_lahir: '1994-09-10', jenis_kelamin: 'Laki-laki', alamat: 'Jl. Pemuda', no_hp: '081234567894', email: 'doni@example.com', pendidikan_terakhir: 'SMK', jurusan: 'Mesin', tanggal_masuk: '2022-06-01', masa_kerja: 2 },
-  { id_karyawan: 'K006', nik: '1006', nama_lengkap: 'Dewi Lestari', jabatan: 'Staff Administrasi', departemen: 'HRD', status_karyawan: 'Kontrak', tempat_lahir: 'Malang', tanggal_lahir: '1997-12-12', jenis_kelamin: 'Perempuan', alamat: 'Jl. Ijen', no_hp: '081234567895', email: 'dewi@example.com', pendidikan_terakhir: 'D3', jurusan: 'Administrasi Perkantoran', tanggal_masuk: '2023-02-01', masa_kerja: 1 },
-];
-
 const departemenOptions = ['Operasional', 'Keuangan', 'HRD', 'Teknik'];
-const jabatanOptions = ['Manager', 'Supervisor Lapangan', 'Staff Operasional', 'Staff Keuangan', 'Staff HRD', 'Staff Administrasi', 'Teknisi'];
+const fallbackJabatanOptions = ['Manager', 'Supervisor Lapangan', 'Staff Operasional', 'Staff Keuangan', 'Staff HRD', 'Staff Administrasi', 'Teknisi'];
 const statusOptions = ['Tetap', 'Kontrak'];
 
 export default function ListKaryawan() {
-  const [data, setData] = useState(initialData);
+  const [data, setData] = useState([]);
+  const [dataJabatan, setDataJabatan] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -53,10 +44,10 @@ export default function ListKaryawan() {
   });
 
   useEffect(() => {
-    const unsubscribe = listenCollection(
+    const unsubscribeKaryawan = listenCollection(
       "karyawan",
       (items) => {
-        setData(items);
+        setData(items.sort((a, b) => String(a.nama_lengkap).localeCompare(String(b.nama_lengkap))));
         setLoadingData(false);
       },
       (error) => {
@@ -66,7 +57,16 @@ export default function ListKaryawan() {
       }
     );
 
-    return unsubscribe;
+    const unsubscribeJabatan = listenCollection(
+      "jabatan",
+      (items) => setDataJabatan(items),
+      console.error
+    );
+
+    return () => {
+      unsubscribeKaryawan();
+      unsubscribeJabatan();
+    };
   }, []);
 
   const filterRef = useRef(null);
@@ -87,10 +87,10 @@ export default function ListKaryawan() {
   const filteredData = useMemo(() => {
     return data.filter(item => {
       const matchSearch =
-        item.nama_lengkap.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.nik.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.jabatan.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.departemen.toLowerCase().includes(searchTerm.toLowerCase());
+        String(item.nama_lengkap || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        String(item.nik || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        String(item.jabatan || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        String(item.departemen || '').toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchDepartemen = filterDepartemen ? item.departemen === filterDepartemen : true;
       const matchStatus = filterStatus ? item.status_karyawan === filterStatus : true;
@@ -102,6 +102,9 @@ export default function ListKaryawan() {
   // Pagination Logic
   const totalPages = Math.ceil(filteredData.length / itemsPerPage);
   const currentData = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const jabatanOptions = dataJabatan.length > 0
+    ? dataJabatan.map((item) => item.nama).filter(Boolean).sort()
+    : fallbackJabatanOptions;
 
   // Handlers
   const handleOpenAdd = () => {
@@ -316,9 +319,15 @@ export default function ListKaryawan() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {currentData.length > 0 ? (
+              {loadingData ? (
+                <tr>
+                  <td colSpan="6" className="px-6 py-8 text-center text-gray-500">
+                    Memuat data karyawan...
+                  </td>
+                </tr>
+              ) : currentData.length > 0 ? (
                 currentData.map((row) => (
-                  <tr key={row.id_karyawan} className="hover:bg-gray-50 transition-colors group">
+                  <tr key={row.docId} className="hover:bg-gray-50 transition-colors group">
                     <td className="px-6 py-3 font-medium text-gray-900">{row.nik}</td>
                     <td className="px-6 py-3 font-medium">{row.nama_lengkap}</td>
                     <td className="px-6 py-3 text-gray-500">{row.jabatan}</td>

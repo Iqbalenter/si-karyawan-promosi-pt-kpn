@@ -1,13 +1,18 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Search, Filter, Printer, Download, Save } from 'lucide-react';
+import { Search, Filter, Download, Save } from 'lucide-react';
 import { clsx } from 'clsx';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import toast from 'react-hot-toast';
+import { listenCollection } from '../../services/firestoreService';
+import { calculateSAW } from '../../utils/saw';
 
 export default function HasilRanking() {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedPeriod, setSelectedPeriod] = useState('Q3 2024');
+  const [hasilRanking, setHasilRanking] = useState([]);
+  const [dataKriteria, setDataKriteria] = useState([]);
+  const [dataPenilaian, setDataPenilaian] = useState([]);
 
   // Filter States
   const [showFilter, setShowFilter] = useState(false);
@@ -27,28 +32,97 @@ export default function HasilRanking() {
     };
   }, []);
 
-  // Dummy final results that would normally be fetched from Firebase "hasil_saw" collection
-  const hasilRanking = [
-    { ranking: 1, id_karyawan: 'K001', nama_karyawan: 'Budi Santoso', jabatan: 'Staff Operasional', departemen: 'Operasional', nilai_akhir: 0.932, status_rekomendasi: 'Sangat Direkomendasikan', periode: 'Q3 2024' },
-    { ranking: 2, id_karyawan: 'K002', nama_karyawan: 'Siti Aminah', jabatan: 'Staff Keuangan', departemen: 'Keuangan', nilai_akhir: 0.885, status_rekomendasi: 'Sangat Direkomendasikan', periode: 'Q3 2024' },
-    { ranking: 3, id_karyawan: 'K003', nama_karyawan: 'Ahmad Faisal', jabatan: 'Supervisor Lapangan', departemen: 'Operasional', nilai_akhir: 0.841, status_rekomendasi: 'Direkomendasikan', periode: 'Q3 2024' },
-    { ranking: 4, id_karyawan: 'K004', nama_karyawan: 'Rina Wijaya', jabatan: 'Staff HRD', departemen: 'HRD', nilai_akhir: 0.792, status_rekomendasi: 'Direkomendasikan', periode: 'Q3 2024' },
-    { ranking: 5, id_karyawan: 'K005', nama_karyawan: 'Doni Pratama', jabatan: 'Teknisi', departemen: 'Teknik', nilai_akhir: 0.715, status_rekomendasi: 'Direkomendasikan', periode: 'Q2 2024' },
-  ];
+  useEffect(() => {
+    const unsubscribes = [
+      listenCollection(
+        'hasil_saw',
+        (items) => {
+          const rows = items
+            .map((item) => ({
+              ...item,
+              ranking: Number(item.ranking || 0),
+              nilai_akhir: Number(item.nilai_akhir || 0),
+            }))
+            .sort((a, b) => a.ranking - b.ranking);
+
+          setHasilRanking(rows);
+        },
+        (error) => {
+          console.error(error);
+          toast.error('Gagal memuat hasil ranking');
+        }
+      ),
+      listenCollection(
+        'kriteria',
+        (items) =>
+          setDataKriteria(
+            items
+              .map((item) => ({
+                ...item,
+                kode_kriteria: item.kode_kriteria || item.kode,
+                jenis: String(item.jenis || 'Benefit').toLowerCase(),
+                bobot: Number(item.bobot || 0),
+              }))
+              .sort((a, b) => String(a.kode_kriteria).localeCompare(String(b.kode_kriteria)))
+          ),
+        (error) => {
+          console.error(error);
+          toast.error('Gagal memuat data kriteria');
+        }
+      ),
+      listenCollection(
+        'penilaian',
+        (items) =>
+          setDataPenilaian(
+            items.map((item) => ({
+              ...item,
+              nilai_absensi: Number(item.nilai_absensi || 0),
+              nilai_kinerja: Number(item.nilai_kinerja || 0),
+              nilai_masa_kerja: Number(item.nilai_masa_kerja || 0),
+              nilai_pendidikan: Number(item.nilai_pendidikan || 0),
+              nilai_kedisiplinan: Number(item.nilai_kedisiplinan || 0),
+            }))
+          ),
+        (error) => {
+          console.error(error);
+          toast.error('Gagal memuat data penilaian');
+        }
+      ),
+    ];
+
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, []);
+
+  const computedRanking = useMemo(() => {
+    if (hasilRanking.length > 0) {
+      return hasilRanking;
+    }
+
+    const scoredPenilaian = dataPenilaian.filter((item) => {
+      return [
+        item.nilai_absensi,
+        item.nilai_kinerja,
+        item.nilai_masa_kerja,
+        item.nilai_pendidikan,
+        item.nilai_kedisiplinan,
+      ].some((value) => Number(value) > 0);
+    });
+
+    return calculateSAW(scoredPenilaian, dataKriteria).hasil_akhir;
+  }, [dataKriteria, dataPenilaian, hasilRanking]);
 
   const filteredData = useMemo(() => {
-    return hasilRanking.filter(item => {
+    return computedRanking.filter(item => {
       const matchSearch = 
-        item.nama_karyawan.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.jabatan.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.departemen.toLowerCase().includes(searchTerm.toLowerCase());
+        String(item.nama_karyawan || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        String(item.jabatan || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        String(item.departemen || '').toLowerCase().includes(searchTerm.toLowerCase());
       
       const matchStatus = filterStatus ? item.status_rekomendasi === filterStatus : true;
-      const matchPeriod = selectedPeriod ? item.periode === selectedPeriod : true;
 
-      return matchSearch && matchStatus && matchPeriod;
+      return matchSearch && matchStatus;
     });
-  }, [hasilRanking, searchTerm, filterStatus, selectedPeriod]);
+  }, [computedRanking, searchTerm, filterStatus]);
 
   const handleExportExcel = () => {
     const ws = XLSX.utils.json_to_sheet(filteredData.map(row => ({
@@ -58,17 +132,16 @@ export default function HasilRanking() {
       Jabatan: row.jabatan,
       Departemen: row.departemen,
       'Nilai Akhir': Number(row.nilai_akhir.toFixed(3)),
-      Status: row.status_rekomendasi,
-      Periode: row.periode
+      Status: row.status_rekomendasi
     })));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, `Ranking SAW ${selectedPeriod}`);
-    XLSX.writeFile(wb, `Hasil_Ranking_SAW_${selectedPeriod.replace(/\s+/g, '_')}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, 'Ranking SAW');
+    XLSX.writeFile(wb, 'Hasil_Ranking_SAW.xlsx');
   };
 
   const handleExportPDF = () => {
     const doc = new jsPDF();
-    doc.text(`Hasil Ranking SAW - Rekomendasi Promosi (${selectedPeriod})`, 14, 15);
+    doc.text('Hasil Ranking SAW - Rekomendasi Promosi', 14, 15);
     
     const tableColumn = ["Ranking", "Nama Karyawan", "Jabatan", "Departemen", "Nilai Akhir", "Status"];
     const tableRows = [];
@@ -94,7 +167,7 @@ export default function HasilRanking() {
       headStyles: { fillColor: [27, 67, 50] } // #1B4332
     });
 
-    doc.save(`Hasil_Ranking_SAW_${selectedPeriod.replace(/\s+/g, '_')}.pdf`);
+    doc.save('Hasil_Ranking_SAW.pdf');
   };
 
   return (
@@ -118,19 +191,7 @@ export default function HasilRanking() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         {/* Toolbar */}
         <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row gap-4 justify-between items-center bg-gray-50/50">
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <span className="text-sm text-slate-500">Periode:</span>
-            <select 
-              value={selectedPeriod}
-              onChange={(e) => setSelectedPeriod(e.target.value)}
-              className="border border-slate-300 rounded-lg py-1.5 pl-3 pr-8 focus:ring-[#40916C] focus:border-[#40916C] font-medium text-sm w-full sm:w-auto outline-none"
-            >
-              <option value="Q3 2024">Q3 2024</option>
-              <option value="Q2 2024">Q2 2024</option>
-              <option value="Q1 2024">Q1 2024</option>
-            </select>
-          </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
              <div className="relative w-full sm:w-64">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-4 w-4 text-slate-400" />

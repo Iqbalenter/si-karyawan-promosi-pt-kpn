@@ -1,20 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, Edit, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import ModalForm from '../../components/ModalForm';
 import ConfirmDialog from '../../components/ConfirmDialog';
-
-const initialData = [
-  { id: 'J01', nama: 'Manager Operasional', departemen: 'Operasional', level: 'Managerial' },
-  { id: 'J02', nama: 'Supervisor Lapangan', departemen: 'Operasional', level: 'Supervisor' },
-  { id: 'J03', nama: 'Staff Keuangan', departemen: 'Keuangan', level: 'Staff' },
-];
+import {
+  createDocument,
+  deleteDocument,
+  listenCollection,
+  updateDocument,
+} from '../../services/firestoreService';
 
 const departemenOptions = ['Operasional', 'Keuangan', 'HRD', 'Teknik'];
 const levelOptions = ['Managerial', 'Supervisor', 'Staff', 'Entry Level'];
 
 export default function ListJabatan() {
-  const [data, setData] = useState(initialData);
+  const [data, setData] = useState([]);
+  const [loadingData, setLoadingData] = useState(true);
 
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -28,6 +29,23 @@ export default function ListJabatan() {
   });
 
   const inputClassName = "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-[#40916C]/20 focus:border-[#40916C] outline-none transition-all";
+
+  useEffect(() => {
+    const unsubscribe = listenCollection(
+      'jabatan',
+      (items) => {
+        setData(items.sort((a, b) => String(a.id).localeCompare(String(b.id))));
+        setLoadingData(false);
+      },
+      (error) => {
+        console.error(error);
+        toast.error('Gagal memuat data jabatan');
+        setLoadingData(false);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
 
   // Handlers
   const handleOpenAdd = () => {
@@ -58,41 +76,49 @@ export default function ListJabatan() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (modalMode === 'add') {
-      const isDuplicate = data.some(item => item.id === formData.id);
-      if (isDuplicate) {
-        toast.error('ID Jabatan sudah terdaftar!');
-        return;
-      }
-      
-      setData([...data, formData]);
-      toast.success('Data jabatan berhasil ditambahkan');
-    } else if (modalMode === 'edit') {
-      const isDuplicate = data.some(item => item.id === formData.id && item.id !== selectedItem.id);
-      if (isDuplicate) {
-        toast.error('ID Jabatan sudah terdaftar pada jabatan lain!');
-        return;
+
+    try {
+      if (modalMode === 'add') {
+        const isDuplicate = data.some(item => item.id === formData.id);
+        if (isDuplicate) {
+          toast.error('ID Jabatan sudah terdaftar!');
+          return;
+        }
+
+        await createDocument('jabatan', formData);
+        toast.success('Data jabatan berhasil ditambahkan');
       }
 
-      const updatedData = data.map(item => 
-        item.id === selectedItem.id ? formData : item
-      );
-      setData(updatedData);
-      toast.success('Data jabatan berhasil diperbarui');
+      if (modalMode === 'edit') {
+        const isDuplicate = data.some(item => item.id === formData.id && item.docId !== selectedItem.docId);
+        if (isDuplicate) {
+          toast.error('ID Jabatan sudah terdaftar pada jabatan lain!');
+          return;
+        }
+
+        await updateDocument('jabatan', selectedItem.docId, formData);
+        toast.success('Data jabatan berhasil diperbarui');
+      }
+
+      handleCloseModal();
+    } catch (error) {
+      console.error(error);
+      toast.error('Gagal menyimpan data jabatan');
     }
-    
-    handleCloseModal();
   };
 
-  const handleDelete = () => {
-    const updatedData = data.filter(item => item.id !== selectedItem.id);
-    setData(updatedData);
-    setIsDeleteDialogOpen(false);
-    setSelectedItem(null);
-    toast.success('Data jabatan berhasil dihapus');
+  const handleDelete = async () => {
+    try {
+      await deleteDocument('jabatan', selectedItem.docId);
+      setIsDeleteDialogOpen(false);
+      setSelectedItem(null);
+      toast.success('Data jabatan berhasil dihapus');
+    } catch (error) {
+      console.error(error);
+      toast.error('Gagal menghapus data jabatan');
+    }
   };
 
   return (
@@ -124,9 +150,15 @@ export default function ListJabatan() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {data.length > 0 ? (
+              {loadingData ? (
+                <tr>
+                  <td colSpan="5" className="px-6 py-8 text-center text-gray-500">
+                    Memuat data jabatan...
+                  </td>
+                </tr>
+              ) : data.length > 0 ? (
                 data.map((row) => (
-                  <tr key={row.id} className="hover:bg-gray-50 transition-colors group">
+                  <tr key={row.docId} className="hover:bg-gray-50 transition-colors group">
                     <td className="px-6 py-4 font-medium text-gray-900">{row.id}</td>
                     <td className="px-6 py-4 text-gray-800">{row.nama}</td>
                     <td className="px-6 py-4 text-gray-500">{row.departemen}</td>

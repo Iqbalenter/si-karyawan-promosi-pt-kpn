@@ -3,17 +3,16 @@ import { Search, Filter, Edit } from 'lucide-react';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
 import ModalForm from '../../components/ModalForm';
-
-const initialData = [
-  { id: 'P01', nik: '1001', nama: 'Budi Santoso', jabatan: 'Staff Operasional', c1: 90, c2: 85, c3: 75, c4: 80, c5: 90, status: 'Sudah Dinilai' },
-  { id: 'P02', nik: '1002', nama: 'Siti Aminah', jabatan: 'Staff Keuangan', c1: 85, c2: 80, c3: 90, c4: 95, c5: 85, status: 'Sudah Dinilai' },
-  { id: 'P03', nik: '1003', nama: 'Ahmad Faisal', jabatan: 'Supervisor Lapangan', c1: 95, c2: 75, c3: 85, c4: 70, c5: 80, status: 'Sudah Dinilai' },
-  { id: 'P04', nik: '1004', nama: 'Rina Wijaya', jabatan: 'Staff HRD', c1: 80, c2: 80, c3: 80, c4: 85, c5: 80, status: 'Sudah Dinilai' },
-  { id: 'P05', nik: '1005', nama: 'Doni Pratama', jabatan: 'Teknisi', c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, status: 'Belum Dinilai' },
-];
+import {
+  createSafeDocId,
+  listenCollection,
+  setDocument,
+} from '../../services/firestoreService';
 
 export default function ListPenilaian() {
-  const [data, setData] = useState(initialData);
+  const [karyawan, setKaryawan] = useState([]);
+  const [penilaian, setPenilaian] = useState([]);
+  const [loadingData, setLoadingData] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
   // Filter States
@@ -21,6 +20,52 @@ export default function ListPenilaian() {
   const [filterStatus, setFilterStatus] = useState('');
 
   const filterRef = useRef(null);
+
+  useEffect(() => {
+    let isKaryawanLoaded = false;
+    let isPenilaianLoaded = false;
+
+    const finishLoading = () => {
+      if (isKaryawanLoaded && isPenilaianLoaded) {
+        setLoadingData(false);
+      }
+    };
+
+    const unsubscribeKaryawan = listenCollection(
+      'karyawan',
+      (items) => {
+        setKaryawan(items);
+        isKaryawanLoaded = true;
+        finishLoading();
+      },
+      (error) => {
+        console.error(error);
+        toast.error('Gagal memuat data karyawan');
+        isKaryawanLoaded = true;
+        finishLoading();
+      }
+    );
+
+    const unsubscribePenilaian = listenCollection(
+      'penilaian',
+      (items) => {
+        setPenilaian(items);
+        isPenilaianLoaded = true;
+        finishLoading();
+      },
+      (error) => {
+        console.error(error);
+        toast.error('Gagal memuat data penilaian');
+        isPenilaianLoaded = true;
+        finishLoading();
+      }
+    );
+
+    return () => {
+      unsubscribeKaryawan();
+      unsubscribePenilaian();
+    };
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -40,6 +85,42 @@ export default function ListPenilaian() {
   const [formData, setFormData] = useState({
     c1: 0, c2: 0, c3: 0, c4: 0, c5: 0
   });
+
+  const data = useMemo(() => {
+    const nilaiByKaryawan = new Map(
+      penilaian
+        .map((item) => [item.id_karyawan, item])
+    );
+
+    return karyawan
+      .map((item) => {
+        const idKaryawan = item.id_karyawan || item.docId;
+        const nilai = nilaiByKaryawan.get(idKaryawan);
+        const c1 = Number(nilai?.nilai_absensi || 0);
+        const c2 = Number(nilai?.nilai_kinerja || 0);
+        const c3 = Number(nilai?.nilai_masa_kerja || 0);
+        const c4 = Number(nilai?.nilai_pendidikan || 0);
+        const c5 = Number(nilai?.nilai_kedisiplinan || 0);
+        const sudahDinilai = [c1, c2, c3, c4, c5].every((value) => value > 0);
+
+        return {
+          id: createSafeDocId(idKaryawan),
+          penilaianDocId: nilai?.docId,
+          id_karyawan: idKaryawan,
+          nik: item.nik,
+          nama: item.nama_lengkap,
+          jabatan: item.jabatan,
+          departemen: item.departemen,
+          c1,
+          c2,
+          c3,
+          c4,
+          c5,
+          status: nilai?.status || (sudahDinilai ? 'Sudah Dinilai' : 'Belum Dinilai'),
+        };
+      })
+      .sort((a, b) => String(a.nama).localeCompare(String(b.nama)));
+  }, [karyawan, penilaian]);
 
   const filteredData = useMemo(() => {
     return data.filter(item => {
@@ -71,27 +152,30 @@ export default function ListPenilaian() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    const updatedData = data.map(item => {
-      if (item.id === selectedItem.id) {
-        return { 
-          ...item, 
-          c1: Number(formData.c1),
-          c2: Number(formData.c2),
-          c3: Number(formData.c3),
-          c4: Number(formData.c4),
-          c5: Number(formData.c5),
-          status: 'Sudah Dinilai'
-        };
-      }
-      return item;
-    });
-    
-    setData(updatedData);
-    toast.success('Nilai penilaian berhasil diperbarui');
-    handleCloseModal();
+
+    try {
+      await setDocument('penilaian', selectedItem.id, {
+        id_karyawan: selectedItem.id_karyawan,
+        nik: selectedItem.nik,
+        nama_karyawan: selectedItem.nama,
+        jabatan: selectedItem.jabatan,
+        departemen: selectedItem.departemen,
+        nilai_absensi: Number(formData.c1),
+        nilai_kinerja: Number(formData.c2),
+        nilai_masa_kerja: Number(formData.c3),
+        nilai_pendidikan: Number(formData.c4),
+        nilai_kedisiplinan: Number(formData.c5),
+        status: 'Sudah Dinilai',
+      });
+
+      toast.success('Nilai penilaian berhasil diperbarui');
+      handleCloseModal();
+    } catch (error) {
+      console.error(error);
+      toast.error('Gagal menyimpan nilai penilaian');
+    }
   };
 
   const inputClassName = "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-[#40916C]/20 focus:border-[#40916C] outline-none transition-all";
@@ -181,7 +265,13 @@ export default function ListPenilaian() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredData.length > 0 ? (
+              {loadingData ? (
+                <tr>
+                  <td colSpan="8" className="px-6 py-8 text-center text-gray-500">
+                    Memuat data penilaian...
+                  </td>
+                </tr>
+              ) : filteredData.length > 0 ? (
                 filteredData.map((row) => (
                   <tr key={row.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4">
@@ -281,4 +371,3 @@ export default function ListPenilaian() {
     </div>
   );
 }
-

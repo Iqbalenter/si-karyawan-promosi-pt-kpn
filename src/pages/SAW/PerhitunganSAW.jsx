@@ -1,39 +1,107 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Calculator, Save, Download } from 'lucide-react';
 import { calculateSAW } from '../../utils/saw';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-
-// Dummy data for simulation
-const dummyKriteria = [
-  { kode_kriteria: 'C1', nama: 'Absensi', jenis: 'benefit', bobot: 20 },
-  { kode_kriteria: 'C2', nama: 'Kinerja', jenis: 'benefit', bobot: 30 },
-  { kode_kriteria: 'C3', nama: 'Masa Kerja', jenis: 'benefit', bobot: 15 },
-  { kode_kriteria: 'C4', nama: 'Pendidikan', jenis: 'benefit', bobot: 15 },
-  { kode_kriteria: 'C5', nama: 'Kedisiplinan', jenis: 'benefit', bobot: 20 },
-];
-
-const dummyPenilaian = [
-  { id_karyawan: 'K001', nama_karyawan: 'Budi Santoso', jabatan: 'Staff Operasional', periode: 'Q3 2024', nilai_absensi: 90, nilai_kinerja: 85, nilai_masa_kerja: 75, nilai_pendidikan: 80, nilai_kedisiplinan: 90 },
-  { id_karyawan: 'K002', nama_karyawan: 'Siti Aminah', jabatan: 'Staff Keuangan', periode: 'Q3 2024', nilai_absensi: 85, nilai_kinerja: 80, nilai_masa_kerja: 90, nilai_pendidikan: 95, nilai_kedisiplinan: 85 },
-  { id_karyawan: 'K003', nama_karyawan: 'Ahmad Faisal', jabatan: 'Supervisor Lapangan', periode: 'Q3 2024', nilai_absensi: 95, nilai_kinerja: 75, nilai_masa_kerja: 85, nilai_pendidikan: 70, nilai_kedisiplinan: 80 },
-  { id_karyawan: 'K004', nama_karyawan: 'Rina Wijaya', jabatan: 'Staff HRD', periode: 'Q3 2024', nilai_absensi: 80, nilai_kinerja: 80, nilai_masa_kerja: 80, nilai_pendidikan: 85, nilai_kedisiplinan: 80 },
-];
+import toast from 'react-hot-toast';
+import {
+  createSafeDocId,
+  listenCollection,
+  replaceCollectionDocuments,
+} from '../../services/firestoreService';
 
 export default function PerhitunganSAW() {
   const [hasCalculated, setHasCalculated] = useState(false);
   const [isCalculating, setIsCalculating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [dataKriteria, setDataKriteria] = useState([]);
+  const [dataPenilaian, setDataPenilaian] = useState([]);
 
-  // Gunakan useMemo agar tidak menghitung ulang pada setiap render jika data sama
-  const hasilSAW = useMemo(() => calculateSAW(dummyPenilaian, dummyKriteria), []);
+  useEffect(() => {
+    const unsubscribes = [
+      listenCollection(
+        'kriteria',
+        (items) =>
+          setDataKriteria(
+            items
+              .map((item) => ({
+                ...item,
+                kode_kriteria: item.kode_kriteria || item.kode,
+                jenis: String(item.jenis || 'Benefit').toLowerCase(),
+                bobot: Number(item.bobot || 0),
+              }))
+              .sort((a, b) => String(a.kode_kriteria).localeCompare(String(b.kode_kriteria)))
+          ),
+        (error) => {
+          console.error(error);
+          toast.error('Gagal memuat data kriteria');
+        }
+      ),
+      listenCollection(
+        'penilaian',
+        (items) =>
+          setDataPenilaian(
+            items
+              .map((item) => ({
+                ...item,
+                nilai_absensi: Number(item.nilai_absensi || 0),
+                nilai_kinerja: Number(item.nilai_kinerja || 0),
+                nilai_masa_kerja: Number(item.nilai_masa_kerja || 0),
+                nilai_pendidikan: Number(item.nilai_pendidikan || 0),
+                nilai_kedisiplinan: Number(item.nilai_kedisiplinan || 0),
+              }))
+          ),
+        (error) => {
+          console.error(error);
+          toast.error('Gagal memuat data penilaian');
+        }
+      ),
+    ];
+
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, []);
+
+  const hasilSAW = useMemo(() => calculateSAW(dataPenilaian, dataKriteria), [dataPenilaian, dataKriteria]);
 
   const handleCalculate = () => {
+    if (dataKriteria.length === 0) {
+      toast.error('Data kriteria belum tersedia di Firestore');
+      return;
+    }
+
+    if (dataPenilaian.length === 0) {
+      toast.error('Data penilaian belum tersedia di Firestore');
+      return;
+    }
+
     setIsCalculating(true);
     setTimeout(() => {
       setHasCalculated(true);
       setIsCalculating(false);
     }, 1000);
+  };
+
+  const handleSaveResults = async () => {
+    if (hasilSAW.hasil_akhir.length === 0) {
+      toast.error('Belum ada hasil SAW untuk disimpan');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      await replaceCollectionDocuments(
+        'hasil_saw',
+        hasilSAW.hasil_akhir,
+        (item) => createSafeDocId(item.id_karyawan)
+      );
+      toast.success('Hasil SAW berhasil disimpan ke Firestore');
+    } catch (error) {
+      console.error(error);
+      toast.error('Gagal menyimpan hasil SAW');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleExportExcel = () => {
@@ -128,12 +196,15 @@ export default function PerhitunganSAW() {
             {isCalculating ? 'Memproses...' : 'Mulai Perhitungan'}
           </button>
         ) : (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button onClick={handleExportExcel} className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium">
               <Download size={16} /> Export Excel
             </button>
-            <button onClick={handleExportPDF} className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 text-emerald-950 rounded-lg hover:bg-amber-600 transition-colors text-sm font-semibold">
-              <Save size={16} /> Simpan Hasil (PDF)
+            <button onClick={handleExportPDF} className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium">
+              <Download size={16} /> Export PDF
+            </button>
+            <button onClick={handleSaveResults} disabled={isSaving} className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 text-emerald-950 rounded-lg hover:bg-amber-600 transition-colors text-sm font-semibold disabled:opacity-70">
+              <Save size={16} /> {isSaving ? 'Menyimpan...' : 'Simpan ke Firestore'}
             </button>
           </div>
         )}

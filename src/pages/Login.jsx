@@ -31,7 +31,7 @@ export default function Login() {
     try {
       setLoading(true);
 
-      await login(email, password);
+      await login(email, password, rememberMe);
 
       if (rememberMe) {
         localStorage.setItem("rememberedEmail", email);

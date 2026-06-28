@@ -1,43 +1,93 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Users, Briefcase, Target, Award } from 'lucide-react';
 import CardStat from '../components/CardStat';
-
-// Dummy data from other pages
-const dataKaryawan = [
-  { id_karyawan: 'K001', nik: '1001', nama_lengkap: 'Budi Santoso' },
-  { id_karyawan: 'K002', nik: '1002', nama_lengkap: 'Siti Aminah' },
-  { id_karyawan: 'K003', nik: '1003', nama_lengkap: 'Ahmad Faisal' },
-  { id_karyawan: 'K004', nik: '1004', nama_lengkap: 'Rina Wijaya' },
-  { id_karyawan: 'K005', nik: '1005', nama_lengkap: 'Doni Pratama' },
-  { id_karyawan: 'K006', nik: '1006', nama_lengkap: 'Dewi Lestari' },
-];
-
-const dataJabatan = [
-  { id: 'J01', nama: 'Manager Operasional', departemen: 'Operasional', level: 'Managerial' },
-  { id: 'J02', nama: 'Supervisor Lapangan', departemen: 'Operasional', level: 'Supervisor' },
-  { id: 'J03', nama: 'Staff Keuangan', departemen: 'Keuangan', level: 'Staff' },
-  { id: 'J04', nama: 'Staff HRD', departemen: 'HRD', level: 'Staff' },
-  { id: 'J05', nama: 'Staff Administrasi', departemen: 'HRD', level: 'Staff' },
-  { id: 'J06', nama: 'Teknisi', departemen: 'Teknik', level: 'Staff' },
-];
-
-const dataKriteria = [
-  { kode: 'C1', nama: 'Absensi', jenis: 'Benefit', bobot: 20 },
-  { kode: 'C2', nama: 'Kinerja', jenis: 'Benefit', bobot: 30 },
-  { kode: 'C3', nama: 'Masa Kerja', jenis: 'Benefit', bobot: 15 },
-  { kode: 'C4', nama: 'Pendidikan', jenis: 'Benefit', bobot: 15 },
-  { kode: 'C5', nama: 'Kedisiplinan', jenis: 'Benefit', bobot: 20 },
-];
-
-const dataRanking = [
-  { ranking: 1, id_karyawan: 'K001', nama_karyawan: 'Budi Santoso', jabatan: 'Staff Operasional', nilai_akhir: 0.932, status_rekomendasi: 'Sangat Direkomendasikan' },
-  { ranking: 2, id_karyawan: 'K002', nama_karyawan: 'Siti Aminah', jabatan: 'Staff Keuangan', nilai_akhir: 0.885, status_rekomendasi: 'Sangat Direkomendasikan' },
-  { ranking: 3, id_karyawan: 'K003', nama_karyawan: 'Ahmad Faisal', jabatan: 'Supervisor Lapangan', nilai_akhir: 0.841, status_rekomendasi: 'Direkomendasikan' },
-  { ranking: 4, id_karyawan: 'K004', nama_karyawan: 'Rina Wijaya', jabatan: 'Staff HRD', nilai_akhir: 0.792, status_rekomendasi: 'Direkomendasikan' },
-  { ranking: 5, id_karyawan: 'K005', nama_karyawan: 'Doni Pratama', jabatan: 'Teknisi', nilai_akhir: 0.715, status_rekomendasi: 'Direkomendasikan' },
-];
+import { listenCollection } from '../services/firestoreService';
+import { calculateSAW } from '../utils/saw';
 
 export default function Dashboard() {
-  const topCandidates = [...dataRanking].sort((a, b) => a.ranking - b.ranking).slice(0, 5);
+  const [dataKaryawan, setDataKaryawan] = useState([]);
+  const [dataJabatan, setDataJabatan] = useState([]);
+  const [dataKriteria, setDataKriteria] = useState([]);
+  const [dataPenilaian, setDataPenilaian] = useState([]);
+  const [dataRanking, setDataRanking] = useState([]);
+
+  useEffect(() => {
+    const unsubscribes = [
+      listenCollection('karyawan', setDataKaryawan, console.error),
+      listenCollection('jabatan', setDataJabatan, console.error),
+      listenCollection(
+        'kriteria',
+        (items) =>
+          setDataKriteria(
+            items.map((item) => ({
+              ...item,
+              kode: item.kode || item.kode_kriteria,
+              kode_kriteria: item.kode_kriteria || item.kode,
+              jenis: String(item.jenis || 'Benefit').toLowerCase(),
+              bobot: Number(item.bobot || 0),
+            }))
+          ),
+        console.error
+      ),
+      listenCollection(
+        'hasil_saw',
+        (items) =>
+          setDataRanking(
+            items.map((item) => ({
+              ...item,
+              nilai_akhir: Number(item.nilai_akhir || 0),
+              ranking: Number(item.ranking || 0),
+            }))
+          ),
+        console.error
+      ),
+      listenCollection(
+        'penilaian',
+        (items) =>
+          setDataPenilaian(
+            items.map((item) => ({
+              ...item,
+              nilai_absensi: Number(item.nilai_absensi || 0),
+              nilai_kinerja: Number(item.nilai_kinerja || 0),
+              nilai_masa_kerja: Number(item.nilai_masa_kerja || 0),
+              nilai_pendidikan: Number(item.nilai_pendidikan || 0),
+              nilai_kedisiplinan: Number(item.nilai_kedisiplinan || 0),
+            }))
+          ),
+        console.error
+      ),
+    ];
+
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, []);
+
+  const computedRanking = useMemo(() => {
+    if (dataRanking.length > 0) {
+      return dataRanking;
+    }
+
+    const scoredPenilaian = dataPenilaian.filter((item) => {
+      return [
+        item.nilai_absensi,
+        item.nilai_kinerja,
+        item.nilai_masa_kerja,
+        item.nilai_pendidikan,
+        item.nilai_kedisiplinan,
+      ].some((value) => Number(value) > 0);
+    });
+
+    return calculateSAW(scoredPenilaian, dataKriteria).hasil_akhir;
+  }, [dataKriteria, dataPenilaian, dataRanking]);
+
+  const candidateCount = useMemo(() => {
+    return computedRanking.length;
+  }, [computedRanking]);
+
+  const topCandidates = useMemo(() => {
+    return [...computedRanking]
+      .sort((a, b) => a.ranking - b.ranking)
+      .slice(0, 5);
+  }, [computedRanking]);
 
   const getStatusColor = (status) => {
     switch(status) {
@@ -60,10 +110,6 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
           <p className="text-slate-500 text-sm mt-1">Ringkasan data HR & Rekomendasi Promosi PT KPN</p>
         </div>
-        <div className="flex items-center gap-2 text-sm text-slate-500 bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm">
-          <span>Periode Penilaian Aktif:</span>
-          <span className="font-semibold text-emerald-700">Q3 2024</span>
-        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -84,7 +130,7 @@ export default function Dashboard() {
         />
         <CardStat 
           title="Kandidat Promosi" 
-          value={dataRanking.length} 
+          value={candidateCount} 
           icon={Target}
           trend={{ value: 1, label: "kandidat baru", isPositive: true }}
           iconBgClass="bg-blue-50"
@@ -104,7 +150,6 @@ export default function Dashboard() {
         <div className="lg:col-span-2 flex flex-col rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="font-bold text-gray-800 uppercase tracking-wide text-xs">Ranking Promosi Teratas (Metode SAW)</h3>
-            <span className="text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-1 rounded">Update: Q3 2024</span>
           </div>
           <div className="flex-1">
             <table className="w-full text-left text-sm">
@@ -118,7 +163,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {topCandidates.map((row) => (
+                {topCandidates.length > 0 ? topCandidates.map((row) => (
                   <tr key={row.ranking} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 font-bold text-[#1B4332]">
                       {row.ranking.toString().padStart(2, '0')}
@@ -132,7 +177,13 @@ export default function Dashboard() {
                       </span>
                     </td>
                   </tr>
-                ))}
+                )) : (
+                  <tr>
+                    <td colSpan="5" className="px-4 py-8 text-center text-gray-500">
+                      Belum ada hasil ranking SAW.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -142,7 +193,7 @@ export default function Dashboard() {
         <div className="flex flex-col rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
           <h3 className="mb-6 font-bold text-gray-800 uppercase tracking-wide text-xs">Bobot Kriteria Penilaian</h3>
           <div className="space-y-5">
-            {[...dataKriteria].sort((a, b) => b.bobot - a.bobot).map((kriteria, idx) => (
+            {dataKriteria.length > 0 ? [...dataKriteria].sort((a, b) => b.bobot - a.bobot).map((kriteria, idx) => (
               <div key={kriteria.kode}>
                 <div className="mb-1 flex items-center justify-between text-xs">
                   <span className="font-medium">{kriteria.kode} - {kriteria.nama}</span>
@@ -152,7 +203,9 @@ export default function Dashboard() {
                   <div className={`h-2 rounded-full ${getKriteriaColor(idx)}`} style={{width: `${kriteria.bobot}%`}}></div>
                 </div>
               </div>
-            ))}
+            )) : (
+              <p className="text-sm text-gray-500">Belum ada data kriteria.</p>
+            )}
           </div>
           
           <div className="mt-auto pt-6">
@@ -167,4 +220,3 @@ export default function Dashboard() {
     </div>
   );
 }
-

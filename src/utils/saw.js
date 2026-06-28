@@ -26,7 +26,6 @@ export const calculateSAW = (dataPenilaian, dataKriteria) => {
       nama_karyawan: penilaian.nama_karyawan,
       jabatan: penilaian.jabatan || '-',
       departemen: penilaian.departemen || '-',
-      periode: penilaian.periode,
       // Mengambil nilai berdasarkan kode kriteria yang disepakati (misal C1 = Absensi, dll)
       // Dalam kasus ini kita petakan kode kriteria ke field yang sesuai
       C1: penilaian.nilai_absensi || 0,
@@ -61,8 +60,7 @@ export const calculateSAW = (dataPenilaian, dataKriteria) => {
       id_karyawan: item.id_karyawan, 
       nama_karyawan: item.nama_karyawan,
       jabatan: item.jabatan,
-      departemen: item.departemen,
-      periode: item.periode
+      departemen: item.departemen
     };
     
     dataKriteria.forEach(kriteria => {
@@ -91,8 +89,7 @@ export const calculateSAW = (dataPenilaian, dataKriteria) => {
       id_karyawan: item.id_karyawan, 
       nama_karyawan: item.nama_karyawan,
       jabatan: item.jabatan,
-      departemen: item.departemen,
-      periode: item.periode
+      departemen: item.departemen
     };
     
     let total_nilai_akhir = 0;
@@ -120,7 +117,6 @@ export const calculateSAW = (dataPenilaian, dataKriteria) => {
       nama_karyawan: item.nama_karyawan,
       jabatan: item.jabatan,
       departemen: item.departemen,
-      periode: item.periode,
       nilai_normalisasi: {
         absensi: item.C1,
         kinerja: item.C2,

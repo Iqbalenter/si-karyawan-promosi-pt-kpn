@@ -1,24 +1,71 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Edit } from 'lucide-react';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
 import ModalForm from '../../components/ModalForm';
+import {
+  createDocument,
+  listenCollection,
+  updateDocument,
+} from '../../services/firestoreService';
+import { useAuth } from '../../contexts/AuthContext';
 
-const initialData = [
-  { kode: 'C1', nama: 'Absensi', jenis: 'Benefit', bobot: 20 },
-  { kode: 'C2', nama: 'Kinerja', jenis: 'Benefit', bobot: 30 },
-  { kode: 'C3', nama: 'Masa Kerja', jenis: 'Benefit', bobot: 15 },
-  { kode: 'C4', nama: 'Pendidikan', jenis: 'Benefit', bobot: 15 },
-  { kode: 'C5', nama: 'Kedisiplinan', jenis: 'Benefit', bobot: 20 },
+const defaultKriteria = [
+  { kode: 'C1', kode_kriteria: 'C1', nama: 'Absensi', jenis: 'Benefit', bobot: 20 },
+  { kode: 'C2', kode_kriteria: 'C2', nama: 'Kinerja', jenis: 'Benefit', bobot: 30 },
+  { kode: 'C3', kode_kriteria: 'C3', nama: 'Masa Kerja', jenis: 'Benefit', bobot: 15 },
+  { kode: 'C4', kode_kriteria: 'C4', nama: 'Pendidikan', jenis: 'Benefit', bobot: 15 },
+  { kode: 'C5', kode_kriteria: 'C5', nama: 'Kedisiplinan', jenis: 'Benefit', bobot: 20 },
 ];
 
 export default function ListKriteria() {
-  const [data, setData] = useState(initialData);
+  const { user } = useAuth();
+  const hasSeeded = useRef(false);
+  const [data, setData] = useState([]);
+  const [loadingData, setLoadingData] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [formData, setFormData] = useState({ bobot: '' });
 
   const totalBobot = data.reduce((acc, curr) => acc + curr.bobot, 0);
+
+  useEffect(() => {
+    const unsubscribe = listenCollection(
+      'kriteria',
+      async (items) => {
+        if (items.length === 0 && user?.role === 'Admin' && !hasSeeded.current) {
+          hasSeeded.current = true;
+          try {
+            await Promise.all(defaultKriteria.map((item) => createDocument('kriteria', item)));
+            toast.success('Kriteria default berhasil dibuat di Firestore');
+          } catch (error) {
+            console.error(error);
+            toast.error('Gagal membuat kriteria default');
+          }
+          return;
+        }
+
+        setData(
+          items
+            .map((item) => ({
+              ...item,
+              kode: item.kode || item.kode_kriteria,
+              kode_kriteria: item.kode_kriteria || item.kode,
+              bobot: Number(item.bobot || 0),
+            }))
+            .sort((a, b) => String(a.kode).localeCompare(String(b.kode)))
+        );
+        setLoadingData(false);
+      },
+      (error) => {
+        console.error(error);
+        toast.error('Gagal memuat data kriteria');
+        setLoadingData(false);
+      }
+    );
+
+    return unsubscribe;
+  }, [user?.role]);
 
   const handleOpenEdit = (item) => {
     setSelectedItem(item);
@@ -35,7 +82,7 @@ export default function ListKriteria() {
     setFormData({ bobot: e.target.value });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const newBobot = parseInt(formData.bobot, 10);
     
@@ -44,13 +91,18 @@ export default function ListKriteria() {
       return;
     }
 
-    const updatedData = data.map(item => 
-      item.kode === selectedItem.kode ? { ...item, bobot: newBobot } : item
-    );
-    
-    setData(updatedData);
-    toast.success('Bobot kriteria berhasil diperbarui');
-    handleCloseModal();
+    try {
+      await updateDocument('kriteria', selectedItem.docId, {
+        ...selectedItem,
+        bobot: newBobot,
+      });
+
+      toast.success('Bobot kriteria berhasil diperbarui');
+      handleCloseModal();
+    } catch (error) {
+      console.error(error);
+      toast.error('Gagal memperbarui bobot kriteria');
+    }
   };
 
   const inputClassName = "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-[#40916C]/20 focus:border-[#40916C] outline-none transition-all";
@@ -81,8 +133,14 @@ export default function ListKriteria() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {data.map((row) => (
-                <tr key={row.kode} className="hover:bg-gray-50 transition-colors group">
+              {loadingData ? (
+                <tr>
+                  <td colSpan="5" className="px-6 py-8 text-center text-gray-500">
+                    Memuat data kriteria...
+                  </td>
+                </tr>
+              ) : data.length > 0 ? data.map((row) => (
+                <tr key={row.docId} className="hover:bg-gray-50 transition-colors group">
                   <td className="px-6 py-4 font-bold text-[#1B4332]">{row.kode}</td>
                   <td className="px-6 py-4 font-medium text-gray-900">{row.nama}</td>
                   <td className="px-6 py-4">
@@ -102,7 +160,13 @@ export default function ListKriteria() {
                     </div>
                   </td>
                 </tr>
-              ))}
+              )) : (
+                <tr>
+                  <td colSpan="5" className="px-6 py-8 text-center text-gray-500">
+                    Belum ada data kriteria di Firestore.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -159,4 +223,3 @@ export default function ListKriteria() {
     </div>
   );
 }
-
