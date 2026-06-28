@@ -1,0 +1,6 @@
+{
+  "name": "SI Karyawan & Promosi PT KPN",
+  "description": "Sistem Informasi Pengelolaan Data Karyawan dan Promosi Menggunakan Metode SAW pada PT Kencana Pertama Nusantara",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+@theme {
+  --color-kpn-dark: #1B4332;
+  --color-kpn-main: #40916C;
+  --color-kpn-hover: #2D6A4F;
+  --color-kpn-accent: #FFB703;
+  --color-kpn-bg: #F8F9FA;
+}
