@@ -22,31 +22,40 @@ export default function Login() {
 
   const handleLogin = async (e) => {
     e.preventDefault();
+
     if (!email || !password) {
       toast.error("Email dan password wajib diisi");
       return;
     }
 
-    if (email !== 'admin@mail.com' || password !== 'admin123') {
-      toast.error("Email atau password salah");
-      return;
-    }
+    try {
+      setLoading(true);
 
-    setLoading(true);
+      await login(email, password);
 
-    if (rememberMe) {
-      localStorage.setItem('rememberedEmail', email);
-    } else {
-      localStorage.removeItem('rememberedEmail');
-    }
+      if (rememberMe) {
+        localStorage.setItem("rememberedEmail", email);
+      } else {
+        localStorage.removeItem("rememberedEmail");
+      }
 
-    // Simulasi proses login
-    setTimeout(() => {
-      setLoading(false);
-      login();
       toast.success("Login berhasil!");
-      navigate('/');
-    }, 1000);
+      navigate("/");
+    } catch (error) {
+      console.error(error);
+
+      if (error.code === "auth/invalid-credential") {
+        toast.error("Email atau password salah");
+      } else if (error.code === "auth/user-not-found") {
+        toast.error("Akun tidak ditemukan");
+      } else if (error.code === "auth/wrong-password") {
+        toast.error("Password salah");
+      } else {
+        toast.error(error.message || "Gagal login");
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

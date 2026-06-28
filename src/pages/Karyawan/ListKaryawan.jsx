@@ -2,6 +2,12 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { Plus, Search, Filter, Edit, Trash2, Eye, X } from 'lucide-react';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
+import {
+  createDocument,
+  deleteDocument,
+  listenCollection,
+  updateDocument,
+} from "../../services/firestoreService";
 import ModalForm from '../../components/ModalForm';
 import ConfirmDialog from '../../components/ConfirmDialog';
 
@@ -21,8 +27,9 @@ const statusOptions = ['Tetap', 'Kontrak'];
 
 export default function ListKaryawan() {
   const [data, setData] = useState(initialData);
+  const [loadingData, setLoadingData] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  
+
   // Filter States
   const [showFilter, setShowFilter] = useState(false);
   const [filterDepartemen, setFilterDepartemen] = useState('');
@@ -37,13 +44,30 @@ export default function ListKaryawan() {
   const [modalMode, setModalMode] = useState('add'); // 'add', 'edit', 'detail'
   const [selectedItem, setSelectedItem] = useState(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  
+
   // Form State
   const [formData, setFormData] = useState({
     nik: '', nama_lengkap: '', jabatan: '', departemen: '', status_karyawan: 'Tetap',
     tempat_lahir: '', tanggal_lahir: '', jenis_kelamin: 'Laki-laki', alamat: '',
     no_hp: '', email: '', pendidikan_terakhir: 'S1', jurusan: '', tanggal_masuk: ''
   });
+
+  useEffect(() => {
+    const unsubscribe = listenCollection(
+      "karyawan",
+      (items) => {
+        setData(items);
+        setLoadingData(false);
+      },
+      (error) => {
+        console.error(error);
+        toast.error("Gagal memuat data karyawan");
+        setLoadingData(false);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
 
   const filterRef = useRef(null);
 
@@ -62,12 +86,12 @@ export default function ListKaryawan() {
   // Filter and Search Logic
   const filteredData = useMemo(() => {
     return data.filter(item => {
-      const matchSearch = 
+      const matchSearch =
         item.nama_lengkap.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.nik.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.jabatan.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.departemen.toLowerCase().includes(searchTerm.toLowerCase());
-      
+
       const matchDepartemen = filterDepartemen ? item.departemen === filterDepartemen : true;
       const matchStatus = filterStatus ? item.status_karyawan === filterStatus : true;
 
@@ -118,53 +142,71 @@ export default function ListKaryawan() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    // Validasi NIK unik
-    if (modalMode === 'add') {
-      const isDuplicate = data.some(item => item.nik === formData.nik);
-      if (isDuplicate) {
-        toast.error('NIK sudah terdaftar!');
-        return;
-      }
-      
-      const newItem = {
-        ...formData,
-        id_karyawan: `K00${data.length + 1}`, // simple ID generation
-        masa_kerja: new Date().getFullYear() - new Date(formData.tanggal_masuk).getFullYear()
-      };
-      setData([...data, newItem]);
-      toast.success('Data karyawan berhasil ditambahkan');
-    } else if (modalMode === 'edit') {
-      const isDuplicate = data.some(item => item.nik === formData.nik && item.id_karyawan !== selectedItem.id_karyawan);
-      if (isDuplicate) {
-        toast.error('NIK sudah terdaftar pada karyawan lain!');
-        return;
+
+    try {
+      const masaKerja =
+        new Date().getFullYear() - new Date(formData.tanggal_masuk).getFullYear();
+
+      if (modalMode === "add") {
+        const isDuplicate = data.some((item) => item.nik === formData.nik);
+
+        if (isDuplicate) {
+          toast.error("NIK sudah terdaftar!");
+          return;
+        }
+
+        await createDocument("karyawan", {
+          ...formData,
+          id_karyawan: `K${Date.now()}`,
+          masa_kerja: masaKerja,
+        });
+
+        toast.success("Data karyawan berhasil ditambahkan");
       }
 
-      const updatedData = data.map(item => 
-        item.id_karyawan === selectedItem.id_karyawan 
-          ? { ...formData, masa_kerja: new Date().getFullYear() - new Date(formData.tanggal_masuk).getFullYear() }
-          : item
-      );
-      setData(updatedData);
-      toast.success('Data karyawan berhasil diperbarui');
+      if (modalMode === "edit") {
+        const isDuplicate = data.some(
+          (item) =>
+            item.nik === formData.nik &&
+            item.docId !== selectedItem.docId
+        );
+
+        if (isDuplicate) {
+          toast.error("NIK sudah terdaftar pada karyawan lain!");
+          return;
+        }
+
+        await updateDocument("karyawan", selectedItem.docId, {
+          ...formData,
+          masa_kerja: masaKerja,
+        });
+
+        toast.success("Data karyawan berhasil diperbarui");
+      }
+
+      handleCloseModal();
+    } catch (error) {
+      console.error(error);
+      toast.error("Gagal menyimpan data karyawan");
     }
-    
-    handleCloseModal();
   };
 
-  const handleDelete = () => {
-    const updatedData = data.filter(item => item.id_karyawan !== selectedItem.id_karyawan);
-    setData(updatedData);
-    setIsDeleteDialogOpen(false);
-    setSelectedItem(null);
-    toast.success('Data karyawan berhasil dihapus');
-    
-    // Adjust pagination if needed
-    if (currentData.length === 1 && currentPage > 1) {
-      setCurrentPage(currentPage - 1);
+  const handleDelete = async () => {
+    try {
+      await deleteDocument("karyawan", selectedItem.docId);
+
+      setIsDeleteDialogOpen(false);
+      setSelectedItem(null);
+      toast.success("Data karyawan berhasil dihapus");
+
+      if (currentData.length === 1 && currentPage > 1) {
+        setCurrentPage(currentPage - 1);
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("Gagal menghapus data karyawan");
     }
   };
 
@@ -177,7 +219,7 @@ export default function ListKaryawan() {
           <h1 className="text-2xl font-bold text-gray-800">Data Karyawan</h1>
           <p className="text-gray-500 text-sm mt-1">Kelola informasi karyawan PT Kencana Pertama Nusantara</p>
         </div>
-        <button 
+        <button
           onClick={handleOpenAdd}
           className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#1B4332] text-white rounded-lg hover:bg-[#2D6A4F] transition-colors shadow-sm font-medium text-sm"
         >
@@ -204,14 +246,14 @@ export default function ListKaryawan() {
               }}
             />
           </div>
-          
+
           <div className="relative w-full sm:w-auto" ref={filterRef}>
-            <button 
+            <button
               onClick={() => setShowFilter(!showFilter)}
               className={clsx(
                 "inline-flex items-center gap-2 px-4 py-2 border rounded-lg transition-colors text-sm font-medium w-full sm:w-auto",
-                showFilter || filterDepartemen || filterStatus 
-                  ? "bg-[#40916C] border-[#40916C] text-white" 
+                showFilter || filterDepartemen || filterStatus
+                  ? "bg-[#40916C] border-[#40916C] text-white"
                   : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
               )}
             >
@@ -224,7 +266,7 @@ export default function ListKaryawan() {
               <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-100 z-10 p-4">
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="text-sm font-bold text-gray-800">Filter</h3>
-                  <button 
+                  <button
                     onClick={() => { setFilterDepartemen(''); setFilterStatus(''); }}
                     className="text-xs text-blue-600 hover:underline"
                   >
@@ -234,7 +276,7 @@ export default function ListKaryawan() {
                 <div className="space-y-4 text-sm">
                   <div>
                     <label className="block text-gray-600 mb-1">Departemen</label>
-                    <select 
+                    <select
                       value={filterDepartemen}
                       onChange={(e) => { setFilterDepartemen(e.target.value); setCurrentPage(1); }}
                       className="w-full border-gray-300 rounded-md py-1.5 focus:ring-[#40916C] focus:border-[#40916C]"
@@ -245,7 +287,7 @@ export default function ListKaryawan() {
                   </div>
                   <div>
                     <label className="block text-gray-600 mb-1">Status Karyawan</label>
-                    <select 
+                    <select
                       value={filterStatus}
                       onChange={(e) => { setFilterStatus(e.target.value); setCurrentPage(1); }}
                       className="w-full border-gray-300 rounded-md py-1.5 focus:ring-[#40916C] focus:border-[#40916C]"
@@ -314,29 +356,29 @@ export default function ListKaryawan() {
             </tbody>
           </table>
         </div>
-        
+
         {/* Pagination */}
         <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex flex-col sm:flex-row items-center justify-between gap-4">
           <span className="text-sm text-gray-500">
             Menampilkan {currentData.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} sampai {Math.min(currentPage * itemsPerPage, filteredData.length)} dari {filteredData.length} data
           </span>
           <div className="flex gap-1">
-            <button 
+            <button
               onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
               disabled={currentPage === 1 || filteredData.length === 0}
               className="px-3 py-1 border border-gray-300 rounded-md bg-white text-gray-500 hover:bg-gray-50 disabled:opacity-50 text-sm font-medium transition-colors"
             >
               Previous
             </button>
-            
+
             {[...Array(totalPages)].map((_, i) => (
-              <button 
+              <button
                 key={i}
                 onClick={() => setCurrentPage(i + 1)}
                 className={clsx(
                   "px-3 py-1 border rounded-md text-sm font-medium transition-colors",
-                  currentPage === i + 1 
-                    ? "bg-[#1B4332] text-white border-[#1B4332]" 
+                  currentPage === i + 1
+                    ? "bg-[#1B4332] text-white border-[#1B4332]"
                     : "bg-white text-gray-500 border-gray-300 hover:bg-gray-50"
                 )}
               >
@@ -344,7 +386,7 @@ export default function ListKaryawan() {
               </button>
             ))}
 
-            <button 
+            <button
               onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
               disabled={currentPage === totalPages || filteredData.length === 0}
               className="px-3 py-1 border border-gray-300 rounded-md bg-white text-gray-500 hover:bg-gray-50 disabled:opacity-50 text-sm font-medium transition-colors"
@@ -356,8 +398,8 @@ export default function ListKaryawan() {
       </div>
 
       {/* Modal Form (Add/Edit) */}
-      <ModalForm 
-        isOpen={isModalOpen && modalMode !== 'detail'} 
+      <ModalForm
+        isOpen={isModalOpen && modalMode !== 'detail'}
         onClose={handleCloseModal}
         title={modalMode === 'add' ? 'Tambah Data Karyawan' : 'Edit Data Karyawan'}
       >
@@ -416,7 +458,7 @@ export default function ListKaryawan() {
                     className={inputClassName} />
                 </div>
               </div>
-              
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Pendidikan</label>
@@ -468,15 +510,15 @@ export default function ListKaryawan() {
           </div>
         </form>
         <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3 mt-4">
-          <button 
-            type="button" 
+          <button
+            type="button"
             onClick={handleCloseModal}
             className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
           >
             Batal
           </button>
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             form="karyawanForm"
             className="px-4 py-2 bg-[#1B4332] text-white rounded-lg text-sm font-medium hover:bg-[#2D6A4F] transition-colors shadow-sm"
           >
@@ -486,8 +528,8 @@ export default function ListKaryawan() {
       </ModalForm>
 
       {/* Modal Detail */}
-      <ModalForm 
-        isOpen={isModalOpen && modalMode === 'detail'} 
+      <ModalForm
+        isOpen={isModalOpen && modalMode === 'detail'}
         onClose={handleCloseModal}
         title="Detail Data Karyawan"
       >
@@ -545,7 +587,7 @@ export default function ListKaryawan() {
       </ModalForm>
 
       {/* Confirm Delete Dialog */}
-      <ConfirmDialog 
+      <ConfirmDialog
         isOpen={isDeleteDialogOpen}
         onClose={() => setIsDeleteDialogOpen(false)}
         onConfirm={handleDelete}
@@ -555,4 +597,3 @@ export default function ListKaryawan() {
     </div>
   );
 }
-

@@ -12,24 +12,35 @@ import HasilRanking from './pages/SAW/HasilRanking';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 function AppRoutes() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        Memuat sesi pengguna...
+      </div>
+    );
+  }
 
   return (
     <Routes>
-      <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" />} />
-      
-      {/* Protected Routes inside DashboardLayout */}
-      <Route path="/" element={isAuthenticated ? <DashboardLayout /> : <Navigate to="/login" />}>
+      <Route
+        path="/login"
+        element={isAuthenticated ? <Navigate to="/" replace /> : <Login />}
+      />
+
+      <Route
+        path="/"
+        element={isAuthenticated ? <DashboardLayout /> : <Navigate to="/login" replace />}
+      >
         <Route index element={<Dashboard />} />
         <Route path="karyawan" element={<ListKaryawan />} />
         <Route path="jabatan" element={<ListJabatan />} />
         <Route path="kriteria" element={<ListKriteria />} />
         <Route path="penilaian" element={<ListPenilaian />} />
-        <Route path="perhitungan-saw" element={<PerhitunganSAW />} />
-        <Route path="hasil-ranking" element={<HasilRanking />} />
+        <Route path="saw/perhitungan" element={<PerhitunganSAW />} />
+        <Route path="saw/hasil" element={<HasilRanking />} />
       </Route>
-      
-      <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
 }
@@ -44,4 +55,3 @@ export default function App() {
     </AuthProvider>
   );
 }
-
